@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Underwater Sanctuary</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0a0a1a;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            height: 100vh;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            position: relative;
+        }
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 14px;
+            text-align: center;
+            pointer-events: none;
+            z-index: 100;
+            animation: fadeInOut 8s infinite;
+        }
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 0.8; }
+        }
+    </style>
+
+<base target="_self">
+
+
+  <button id="fs-toggle">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M1.5 1H6v1.5H3v3H1.5V1zM10 1h4.5v4.5H13v-3h-3V1zM1.5 10.5H3v3h3V15H1.5v-4.5zM13 13.5v-3h1.5V15H10v-1.5h3z"></path>
+    </svg>
+  </button>
+    <div id="canvas-container">
+        <div class="instructions">Move your cursor to interact with the sanctuary<br>Click to create ripples</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+    <script>
+        const sketch = (p) => {
+            // Color palette
+            const colors = {
+                waterDark: p.color(6, 28, 64),
+                waterMid: p.color(9, 61, 115),
+                waterLight: p.color(32, 178, 170),
+                jellyfish: p.color(255, 190, 255),
+                jellyfishGlow: p.color(255, 220, 255, 100),
+                particle: p.color(200, 230, 255, 150),
+                ripple: p.color(100, 200, 255, 100)
+            };
+
+            // System parameters
+            let jellyfish = [];
+            let particles = [];
+            let ripples = [];
+            let maxParticles = 1500;
+            let maxJellyfish = 15;
+            let maxRipples = 20;
+            let lastFrameRate = 60;
+            let quality = 1;
+            let lightPos;
+
+            // Jellyfish class
+            class Jellyfish {
+                constructor() {
+                    this.reset();
+                    this.size = p.random(30, 80);
+                    this.tentacles = Math.floor(p.random(5, 9));
+                    this.tentacleLength = this.size * p.random(1.5, 2.5);
+                    this.pulseSpeed = p.random(0.01, 0.03);
+                    this.pulsePhase = p.random(p.TWO_PI);
+                    this.wobble = p.random(0.1, 0.3);
+                    this.wobblePhase = p.random(p.TWO_PI);
+                    this.noiseOffset = p.random(1000);
+                    this.noiseScale = p.random(0.005, 0.01);
+                    this.hueOffset = p.random(-20, 20);
+                    this.glowIntensity = p.random(0.3, 0.8);
+                }
+
+                reset() {
+                    this.pos = p.createVector(
+                        p.random(p.width * 0.1, p.width * 0.9),
+                        p.random(p.height * 0.1, p.height * 0.9)
+                    );
+                    this.vel = p.createVector(
+                        p.random(-0.5, 0.5),
+                        p.random(-0.3, 0.3)
+                    );
+                    this.acc = p.createVector(0, 0);
+                }
+
+                update() {
+                    // Apply fluid motion with noise
+                    let n = p.noise(
+                        this.pos.x * this.noiseScale,
+                        this.pos.y * this.noiseScale,
+                        p.frameCount * 0.001
+                    );
+                    let angle = p.map(n, 0, 1, -p.PI, p.PI);
+                    this.acc.add(p.createVector(p.cos(angle), p.sin(angle)).mult(0.05));
+
+                    // Avoid edges
+                    if (this.pos.x < this.size || this.pos.x > p.width - this.size) {
+                        this.vel.x *= -0.5;
+                    }
+                    if (this.pos.y < this.size || this.pos.y > p.height - this.size) {
+                        this.vel.y *= -0.5;
+                    }
+
+                    // Apply physics
+                    this.vel.add(this.acc);
+                    this.vel.limit(1.5);
+                    this.pos.add(this.vel);
+                    this.acc.mult(0);
+
+                    // React to mouse
+                    if (lightPos) {
+                        let mouseDist = p.dist(this.pos.x, this.pos.y, lightPos.x, lightPos.y);
+                        if (mouseDist < 200) {
+                            let repelForce = p.createVector(
+                                this.pos.x - lightPos.x,
+                                this.pos.y - lightPos.y
+                            ).normalize().mult(0.5);
+                            this.acc.add(repelForce);
+                        }
+                    }
+                }
+
+                display() {
+                    p.push();
+                    p.translate(this.pos.x, this.pos.y);
+
+                    // Pulsing glow
+                    let pulse = p.sin(p.frameCount * this.pulseSpeed + this.pulsePhase) * 0.5 + 0.5;
+                    let currentGlow = this.glowIntensity * pulse;
+
+                    // Body
+                    let jellyColor = p.color(
+                        p.red(colors.jellyfish) + this.hueOffset,
+                        p.green(colors.jellyfish),
+                        p.blue(colors.jellyfish)
+                    );
+                    p.fill(jellyColor);
+                    p.noStroke();
+                    
+                    // Wobble effect
+                    let wobble = p.sin(p.frameCount * 0.05 + this.wobblePhase) * this.wobble;
+                    p.scale(1 + wobble, 1 - wobble);
+
+                    // Draw bell shape
+                    p.beginShape();
+                    for (let i = 0; i < p.TWO_PI; i += 0.1) {
+                        let r = this.size * (0.8 + 0.2 * p.sin(i * 5 + p.frameCount * 0.05));
+                        let x = r * p.cos(i);
+                        let y = r * p.sin(i);
+                        p.vertex(x, y);
+                    }
+                    p.endShape(p.CLOSE);
+
+                    // Tentacles
+                    for (let i = 0; i < this.tentacles; i++) {
+                        let angle = p.map(i, 0, this.tentacles, 0, p.TWO_PI);
+                        let tentacleWobble = p.sin(p.frameCount * 0.1 + i) * 0.3;
+                        
+                        p.beginShape();
+                        p.vertex(0, 0);
+                        for (let j = 1; j <= 5; j++) {
+                            let t = j / 5;
+                            let x = this.tentacleLength * t * p.cos(angle + tentacleWobble * t);
+                            let y = this.tentacleLength * t * p.sin(angle + tentacleWobble * t);
+                            p.vertex(x, y);
+                        }
+                        p.endShape();
+                    }
+
+                    // Glow effect
+                    if (currentGlow > 0.1) {
+                        p.fill(
+                            p.red(colors.jellyfishGlow),
+                            p.green(colors.jellyfishGlow),
+                            p.blue(colors.jellyfishGlow),
+                            currentGlow * 100
+                        );
+                        p.ellipse(0, 0, this.size * 2.5, this.size * 2.5);
+                    }
+
+                    p.pop();
+                }
+            }
+
+            // Particle class
+            class Particle {
+                constructor() {
+                    this.reset();
+                    this.size = p.random(1, 4);
+                    this.z = p.random(0.5, 3); // Depth factor
+                    this.speed = p.random(0.2, 0.8) * this.z;
+                }
+
+                reset() {
+                    this.pos = p.createVector(
+                        p.random(p.width),
+                        p.random(-50, 0)
+                    );
+                    this.vel = p.createVector(
+                        p.random(-0.2, 0.2),
+                        this.speed
+                    );
+                    this.life = p.random(100, 300);
+                    this.maxLife = this.life;
+                }
+
+                update() {
+                    this.pos.add(this.vel);
+                    this.life--;
+
+                    // React to mouse
+                    if (lightPos) {
+                        let mouseDist = p.dist(this.pos.x, this.pos.y, lightPos.x, lightPos.y);
+                        if (mouseDist < 150) {
+                            let angle = p.atan2(this.pos.y - lightPos.y, this.pos.x - lightPos.x);
+                            this.vel.add(p.createVector(p.cos(angle), p.sin(angle)).mult(0.1));
+                        }
+                    }
+
+                    // Reset if out of bounds or dead
+                    if (this.pos.y > p.height + 50 || this.life <= 0) {
+                        this.reset();
+                    }
+                }
+
+                display() {
+                    let alpha = p.map(this.life, this.maxLife, 0, 200, 0);
+                    p.fill(
+                        p.red(colors.particle),
+                        p.green(colors.particle),
+                        p.blue(colors.particle),
+                        alpha * 0.8
+                    );
+                    p.noStroke();
+                    p.ellipse(this.pos.x, this.pos.y, this.size * this.z);
+                }
+            }
+
+            // Ripple class
+            class Ripple {
+                constructor(x, y) {
+                    this.pos = p.createVector(x, y);
+                    this.radius = 5;
+                    this.maxRadius = p.random(100, 200);
+                    this.speed = p.random(2, 4);
+                    this.life = 255;
+                    this.decay = p.random(2, 4);
+                }
+
+                update() {
+                    this.radius += this.speed;
+                    this.life -= this.decay;
+                    return this.life > 0 && this.radius < this.maxRadius;
+                }
+
+                display() {
+                    p.noFill();
+                    p.stroke(
+                        p.red(colors.ripple),
+                        p.green(colors.ripple),
+                        p.blue(colors.ripple),
+                        this.life
+                    );
+                    p.strokeWeight(1 + this.radius / 50);
+                    p.ellipse(this.pos.x, this.pos.y, this.radius * 2);
+                }
+            }
+
+            p.setup = () => {
+                let canvas = p.createCanvas(p.min(p.windowWidth, 1200), p.windowHeight);
+                canvas.parent('canvas-container');
+                p.colorMode(p.RGB);
+                p.ellipseMode(p.CENTER);
+
+                // Initialize jellyfish
+                for (let i = 0; i < maxJellyfish; i++) {
+                    jellyfish.push(new Jellyfish());
+                }
+
+                // Initialize particles
+                for (let i = 0; i < maxParticles * 0.5; i++) {
+                    particles.push(new Particle());
+                }
+
+                // Create water gradient
+                createWaterGradient();
+            };
+
+            p.draw = () => {
+                // Monitor frame rate and adjust quality
+                monitorPerformance();
+
+                // Background with gradient
+                p.image(waterGradient, 0, 0, p.width, p.height);
+
+                // Update and display all elements
+                updateAndDisplayJellyfish();
+                updateAndDisplayParticles();
+                updateAndDisplayRipples();
+
+                // Light effect from mouse
+                if (lightPos) {
+                    drawLightEffect();
+                }
+            };
+
+            let waterGradient;
+            function createWaterGradient() {
+                waterGradient = p.createGraphics(p.width, p.height);
+                for (let y = 0; y < p.height; y++) {
+                    let inter = p.map(y, 0, p.height, 0, 1);
+                    let c = p.lerpColor(colors.waterDark, colors.waterMid, inter);
+                    waterGradient.stroke(c);
+                    waterGradient.line(0, y, p.width, y);
+                }
+                
+                // Add some light rays
+                waterGradient.blendMode(p.ADD);
+                for (let i = 0; i < 5; i++) {
+                    let x = p.random(p.width);
+                    let w = p.random(20, 100);
+                    let h = p.height;
+                    let gradient = waterGradient.drawingContext.createLinearGradient(x - w/2, 0, x + w/2, 0);
+                    gradient.addColorStop(0, 'rgba(32, 178, 170, 0)');
+                    gradient.addColorStop(0.5, 'rgba(32, 178, 170, 0.05)');
+                    gradient.addColorStop(1, 'rgba(32, 178, 170, 0)');
+                    waterGradient.drawingContext.fillStyle = gradient;
+                    waterGradient.rect(x - w/2, 0, w, h);
+                }
+                waterGradient.blendMode(p.BLEND);
+            }
+
+            function monitorPerformance() {
+                // Simple frame rate monitoring
+                if (p.frameCount % 30 === 0) {
+                    lastFrameRate = p.frameRate();
+                }
+
+                // Adjust quality based on frame rate
+                if (lastFrameRate < 45 && quality > 0.5) {
+                    quality *= 0.95;
+                } else if (lastFrameRate > 55 && quality < 1) {
+                    quality *= 1.05;
+                }
+                quality = p.constrain(quality, 0.5, 1);
+            }
+
+            function updateAndDisplayJellyfish() {
+                for (let j of jellyfish) {
+                    j.update();
+                    if (quality > 0.7 || p.frameCount % 2 === 0) {
+                        j.display();
+                    }
+                }
+            }
+
+            function updateAndDisplayParticles() {
+                // Adjust particle count based on quality
+                let targetParticles = p.floor(maxParticles * quality);
+                while (particles.length > targetParticles) {
+                    particles.pop();
+                }
+                while (particles.length < targetParticles) {
+                    particles.push(new Particle());
+                }
+
+                // Update and display particles
+                for (let particle of particles) {
+                    particle.update();
+                    if (quality > 0.6 || p.frameCount % 3 === 0) {
+                        particle.display();
+                    }
+                }
+            }
+
+            function updateAndDisplayRipples() {
+                for (let i = ripples.length - 1; i >= 0; i--) {
+                    if (!ripples[i].update()) {
+                        ripples.splice(i, 1);
+                    } else {
+                        ripples[i].display();
+                    }
+                }
+            }
+
+            function drawLightEffect() {
+                p.blendMode(p.ADD);
+                let gradient = p.drawingContext.createRadialGradient(
+                    lightPos.x, lightPos.y, 0,
+                    lightPos.x, lightPos.y, 200
+                );
+                gradient.addColorStop(0, 'rgba(100, 200, 255, 0.2)');
+                gradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
+                p.drawingContext.fillStyle = gradient;
+                p.ellipse(lightPos.x, lightPos.y, 400);
+                p.blendMode(p.BLEND);
+            }
+
+            // Interaction handlers
+            p.mouseMoved = () => {
+                if (p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+                    lightPos = p.createVector(p.mouseX, p.mouseY);
+                    
+                    // Create particles when moving quickly
+                    if (p.dist(p.mouseX, p.mouseY, p.pmouseX, p.pmouseY) > 5 && p.random() < 0.3) {
+                        createBubbleBurst(p.mouseX, p.mouseY);
+                    }
+                } else {
+                    lightPos = null;
+                }
+            };
+
+            p.mouseDragged = () => {
+                p.mouseMoved(); // Same behavior as mouse moved
+            };
+
+            p.mouseClicked = () => {
+                if (ripples.length < maxRipples) {
+                    ripples.push(new Ripple(p.mouseX, p.mouseY));
+                }
+                
+                // Create bubble burst on click
+                createBubbleBurst(p.mouseX, p.mouseY);
+            };
+
+            function createBubbleBurst(x, y) {
+                if (particles.length < maxParticles * 0.9) {
+                    for (let i = 0; i < 10 * quality; i++) {
+                        let p = new Particle();
+                        p.pos = p.createVector(x, y);
+                        p.vel = p.createVector(
+                            p.random(-2, 2),
+                            p.random(-3, -1)
+                        );
+                        p.life = p.random(30, 100);
+                        p.z = p.random(0.8, 1.5);
+                        particles.push(p);
+                    }
+                }
+            }
+
+            p.touchMoved = () => {
+                p.mouseMoved();
+                return false; // Prevent scrolling
+            };
+
+            p.touchStarted = () => {
+                p.mouseClicked();
+                return false; // Prevent scrolling
+            };
+
+            p.windowResized = () => {
+                p.resizeCanvas(p.min(p.windowWidth, 1200), p.windowHeight);
+                createWaterGradient();
+            };
+        };
+
+        new p5(sketch);
+    
+  // Fullscreen toggle
+  document.getElementById('fs-toggle').addEventListener('click', function() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log('Fullscreen request failed: ', err);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  });
+  
+  // Hide fullscreen button after inactivity
+  const fsButton = document.getElementById('fs-toggle');
+  let timeout;
+  document.addEventListener('mousemove', function() {
+    fsButton.style.opacity = '0.3';
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      fsButton.style.opacity = '0';
+    }, 2000);
+  });
+  </script>
+
+              
+          
+                
+          
+              
